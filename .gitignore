@@ -1,0 +1,20 @@
+# operator secrets — NEVER commit
+config.php
+config.php.bak*
+vapid.pem
+
+# runtime data (SQLite DB, transcripts, PII)
+data/*
+!data/.gitkeep
+
+# editor / OS cruft
+*.bak
+*.bak-*
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# PHP composer, if it ever gets added
+/vendor/
+composer.lock

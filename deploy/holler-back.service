@@ -1,0 +1,25 @@
+[Unit]
+Description=Holler Back WebSocket server
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/holler-back
+ExecStart=/usr/bin/php /var/www/holler-back/ws-server.php
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:/var/log/holler-back.log
+StandardError=append:/var/log/holler-back.log
+
+# Hardening — the WS process only needs to bind loopback, read the code tree,
+# and read/write data/. It should never spawn processes or touch anything else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/www/holler-back/data /var/log
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
