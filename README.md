@@ -1,3 +1,11 @@
+<!-- home-banner -->
+> ### 🏠 Home is [git.subgenius.finance](https://git.subgenius.finance/SubGeniusFinance/holler-back).
+>
+> The GitHub copy is a **mirror, pushed from here** — issues and pull requests opened there are not watched.
+>
+> **Have a fork or a clone?** Point it home with `git remote set-url origin https://git.subgenius.finance/SubGeniusFinance/holler-back.git`
+
+---
 # Holler Back
 
 **They holler, you holler back.**
