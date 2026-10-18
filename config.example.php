@@ -33,6 +33,10 @@ return array(
 	'admin_pass_hash'  => '',
 	'cookie_secret'    => 'CHANGE_ME_TO_A_LONG_RANDOM_STRING',
 
+	// REQUIRED for first-run setup: the setup page asks for it, so a stranger who
+	// reaches a fresh install first cannot claim it. `openssl rand -hex 16`.
+	'setup_key'        => '',
+
 	// ---- VAPID (Web Push) ---------------------------------------------------
 	// Contact email put in the VAPID "sub" claim. Push providers use it if
 	// they need to reach you about abusive push traffic. Any mailto: is fine.

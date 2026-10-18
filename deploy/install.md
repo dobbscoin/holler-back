@@ -81,10 +81,11 @@ www-data redirect fails and the purge never runs.
 
 ## 7. First-run
 
-⚠ The setup wizard is claimed by **whoever reaches it first**. Before the
-vhost goes public, either finish setup over an SSH tunnel, or restrict
-`/admin/` to your own IP / VPN in nginx (`allow …; deny all;`) until the
-passphrase is set. Keeping `/admin/` VPN-only afterwards is a good default.
+Set `setup_key` in config.php first (`openssl rand -hex 16`). The setup
+page asks for it, so a stranger who reaches a fresh install first can't
+claim it. You can pre-fill it: `https://chat.example.com/admin/setup.php?key=…`.
+Restricting `/admin/` to a VPN in nginx (`allow …; deny all;`) is extra
+defense, but your phone then needs the VPN to get the console.
 
 Visit `https://chat.example.com/admin/` — you'll be sent to the setup wizard.
 Set a passphrase (≥10 chars), enter the allowed origins for your widget

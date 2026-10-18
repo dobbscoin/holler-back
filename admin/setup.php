@@ -16,13 +16,16 @@ $ws = Workspace::primary();
 
 if ( $_SERVER['REQUEST_METHOD'] === 'POST' ) {
 	csrf_check();
+	if ( ! rate_hit( 'setup:' . client_ip(), 900, 10 ) ) { http_response_code( 429 ); exit( 'Too many attempts. Try again in 15 minutes.' ); }
+	$setupKey = trim( (string) Config::get( 'setup_key', '' ) );
 	$pass = (string) req( 'pass', '' );
 	$pass2 = (string) req( 'pass2', '' );
 	$display = trim( (string) req( 'display_name', '' ) );
 	$origin  = trim( (string) req( 'allowed_origins', '' ) );
 	$op      = trim( (string) req( 'operator_name', 'Support' ) );
 
-	if ( strlen( $pass ) < 10 ) { $err = 'Passphrase must be at least 10 characters.'; }
+	if ( strlen( $setupKey ) < 16 || ! hash_equals( $setupKey, (string) req( 'setup_key', '' ) ) ) { $err = 'Setup key missing or wrong. It is the setup_key value in config.php.'; }
+	elseif ( strlen( $pass ) < 10 ) { $err = 'Passphrase must be at least 10 characters.'; }
 	elseif ( $pass !== $pass2 ) { $err = 'Passphrases don\'t match.'; }
 	elseif ( $origin === '' ) { $err = 'At least one allowed origin is required (e.g. https://your-site.com).'; }
 	else {
@@ -52,6 +55,13 @@ admin_head( 'Setup' );
 
 	<form method="post">
 		<?= csrf_field() ?>
+
+		<?php if ( strlen( trim( (string) Config::get( 'setup_key', '' ) ) ) < 16 ) : ?>
+		<div class="hb-err">Set <code>setup_key</code> in config.php first (<code>openssl rand -hex 16</code>), then reload. It proves you are the one installing this server.</div>
+		<?php endif ?>
+
+		<label>Setup key (the setup_key value from config.php)</label>
+		<input type="password" name="setup_key" required autocomplete="off" value="<?= h( (string) ( $_GET['key'] ?? '' ) ) ?>">
 
 		<label>Admin passphrase (min 10 chars)</label>
 		<input type="password" name="pass" required minlength="10" autocomplete="new-password">
