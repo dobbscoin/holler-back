@@ -31,7 +31,7 @@ class Auth {
 		if ( count( $parts ) !== 2 ) { return false; }
 		list( $ts, $sig ) = $parts;
 		if ( ! ctype_digit( $ts ) || ( time() - (int) $ts ) > self::TTL ) { return false; }
-		$want = hash_hmac( 'sha256', $ts, csrf_secret() );
+		$want = hb_sign( 'sess', $ts );
 		return hash_equals( $want, $sig );
 	}
 
@@ -39,7 +39,7 @@ class Auth {
 		if ( ! self::passSet() ) { return false; }
 		if ( ! password_verify( (string) $pass, self::hash() ) ) { return false; }
 		$ts  = (string) time();
-		$sig = hash_hmac( 'sha256', $ts, csrf_secret() );
+		$sig = hb_sign( 'sess', $ts );
 		setcookie( self::COOKIE, $ts . '.' . $sig, array(
 			'expires'  => time() + self::TTL,
 			'httponly' => true,
@@ -60,16 +60,7 @@ class Auth {
 		return true;
 	}
 
-	/** Bearer token for the admin WebSocket. Short-lived HMAC over the session ts. */
-	public static function wsToken() {
-		if ( ! self::loggedIn() ) { return ''; }
-		$parts = explode( '.', (string) $_COOKIE[ self::COOKIE ] );
-		$ts  = (string) time();
-		$sig = hash_hmac( 'sha256', $ts . '|' . $parts[0], csrf_secret() );
-		return $ts . '.' . $sig;
-	}
-
-	/** Validate a token minted by wsToken() — used by ws-server.php's HTTP upgrade path. */
+	/** Validate a token minted by mintWsToken() — used by ws-server.php's HTTP upgrade path. */
 	public static function verifyWsToken( $tok, $maxAgeSec = 60 ) {
 		$parts = explode( '.', (string) $tok );
 		if ( count( $parts ) !== 2 || ! ctype_digit( $parts[0] ) ) { return false; }
@@ -79,7 +70,7 @@ class Auth {
 		// simpler is to bind the WS token to the passphrase-hash directly.
 		$hash = self::hash();
 		if ( $hash === '' ) { return false; }
-		$want = hash_hmac( 'sha256', $parts[0] . '|' . substr( $hash, 0, 12 ), csrf_secret() );
+		$want = hb_sign( 'ws', $parts[0] . '|' . substr( $hash, 0, 12 ) );
 		return hash_equals( $want, $parts[1] );
 	}
 
@@ -88,7 +79,7 @@ class Auth {
 		if ( ! self::loggedIn() ) { return ''; }
 		$hash = self::hash();
 		$ts = (string) time();
-		$sig = hash_hmac( 'sha256', $ts . '|' . substr( $hash, 0, 12 ), csrf_secret() );
+		$sig = hb_sign( 'ws', $ts . '|' . substr( $hash, 0, 12 ) );
 		return $ts . '.' . $sig;
 	}
 

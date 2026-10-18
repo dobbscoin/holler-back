@@ -1,4 +1,7 @@
 <?php
+// Buffer the whole page: csrf_token() may set a cookie after admin_head() has
+// printed ~5 KB of CSS, past FPM's 4 KB output_buffering.
+ob_start();
 require_once __DIR__ . '/../lib/bootstrap.php';
 
 function admin_head( $title ) {

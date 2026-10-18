@@ -22,7 +22,7 @@ Edit `config.php`:
 Permissions:
 
 ```bash
-sudo chown -R btcbob:www-data /var/www/holler-back
+sudo chown -R $USER:www-data /var/www/holler-back
 sudo chmod 640 /var/www/holler-back/config.php
 sudo chmod -R g+w /var/www/holler-back/data
 ```
@@ -30,7 +30,7 @@ sudo chmod -R g+w /var/www/holler-back/data
 ## 2. PHP + extensions
 
 ```bash
-sudo apt install php8.3-cli php8.3-fpm php8.3-sqlite3 php8.3-gmp php8.3-curl
+sudo apt install php8.3-cli php8.3-fpm php8.3-sqlite3 php8.3-gmp php8.3-curl php8.3-mbstring
 ```
 
 `pcntl` is used by `ws-server.php` for SIGTERM handling — it's built into
@@ -71,11 +71,20 @@ sudo certbot --nginx -d chat.example.com --redirect --agree-tos -m ops@example.c
 
 ```bash
 sudo tee /etc/cron.d/holler-back <<'EOF'
-17 3 * * * www-data /usr/bin/php /var/www/holler-back/worker/purge.php >> /var/log/holler-back.log 2>&1
+17 3 * * * www-data /usr/bin/php /var/www/holler-back/worker/purge.php
 EOF
 ```
 
+`purge.php` logs to `data/holler.log` itself. Don't redirect into
+`/var/log/holler-back.log`: systemd creates that file as root, so a
+www-data redirect fails and the purge never runs.
+
 ## 7. First-run
+
+⚠ The setup wizard is claimed by **whoever reaches it first**. Before the
+vhost goes public, either finish setup over an SSH tunnel, or restrict
+`/admin/` to your own IP / VPN in nginx (`allow …; deny all;`) until the
+passphrase is set. Keeping `/admin/` VPN-only afterwards is a good default.
 
 Visit `https://chat.example.com/admin/` — you'll be sent to the setup wizard.
 Set a passphrase (≥10 chars), enter the allowed origins for your widget
@@ -124,7 +133,9 @@ allowed origins. Add it in the console Settings tab.
 
 **"Reconnecting…" banner never clears** — `ws-server` isn't running or
 nginx WS proxy isn't reaching it. Check `curl http://127.0.0.1:8090/`
-returns `404 Not Found` (means it's listening).
+returns `426 Upgrade Required` (means it's listening). nginx must use
+`proxy_pass http://127.0.0.1:8090;` with **no** trailing slash — the server
+routes on the full `/ws/...` path.
 
 **Push subscribe fails with "vapid_not_configured"** — the VAPID keys
 weren't generated. Run `php -r 'require "lib/bootstrap.php"; require

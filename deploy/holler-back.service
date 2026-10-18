@@ -17,7 +17,7 @@ StandardError=append:/var/log/holler-back.log
 # and read/write data/. It should never spawn processes or touch anything else.
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/var/www/holler-back/data /var/log
+ReadWritePaths=/var/www/holler-back/data
 ProtectHome=true
 PrivateTmp=true
 

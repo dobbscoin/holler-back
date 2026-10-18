@@ -7,11 +7,11 @@
  *   2. Cache the admin shell for offline start (so opening the PWA when the
  *      network is flaky still renders — the WS will reconnect once online).
  *
- * We intentionally do NOT precache admin dependencies at install-time — that
- * complicates upgrades. Runtime cache-first for the shell URLs is enough.
+ * Network-first for the shell: the admin page embeds a fresh CSRF token and
+ * code updates must reach installed apps. The cache is only an offline fallback.
  */
 
-const CACHE = 'hb-shell-v1';
+const CACHE = 'hb-shell-v2';
 const SHELL = ['/admin/', '/admin.js', '/manifest.json'];
 
 self.addEventListener('install', (ev) => {
@@ -33,11 +33,13 @@ self.addEventListener('fetch', (ev) => {
   if (url.origin !== self.location.origin) return;
   if (!SHELL.includes(url.pathname)) return;
   ev.respondWith(
-    caches.match(ev.request).then((hit) => hit || fetch(ev.request).then((r) => {
-      const clone = r.clone();
-      caches.open(CACHE).then((c) => c.put(ev.request, clone));
+    fetch(ev.request).then((r) => {
+      if (r.ok && !r.redirected) {
+        const clone = r.clone();
+        caches.open(CACHE).then((c) => c.put(ev.request, clone));
+      }
       return r;
-    }))
+    }).catch(() => caches.match(ev.request))
   );
 });
 

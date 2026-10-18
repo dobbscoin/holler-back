@@ -14,6 +14,8 @@
     };
     if (body != null) opts.body = JSON.stringify(body);
     return fetch(path, opts).then(function (r) {
+      // Session expired (12h) — go sign in rather than retrying forever
+      if (r.status === 401) { location.href = '/admin/login.php'; return new Promise(function () {}); }
       return r.json().then(function (j) { return { code: r.status, body: j }; }).catch(function () { return { code: r.status, body: {} }; });
     });
   }
@@ -52,7 +54,8 @@
 
   function onEnvelope(env) {
     if (env.type === 'message.new') {
-      if (state.current && state.current.id === env.conv_id) {
+      // Our own replies are already on screen (appended when sent)
+      if (state.current && state.current.id === env.conv_id && env.msg.sender !== 'operator') {
         appendMsg(env.msg);
         state.lastMsgId = Math.max(state.lastMsgId, env.msg.id);
       }
@@ -122,7 +125,10 @@
       '</form>';
     document.getElementById('hb-close').addEventListener('click', function () {
       if (!confirm('Close this conversation?')) return;
-      api('POST', '/api/admin/close', { conv_id: c.id }).then(function () { refreshConvs(); showEmpty('Conversation closed.'); });
+      api('POST', '/api/admin/close', { conv_id: c.id }).then(function (r) {
+        if (r.code !== 200) { alert('Close failed (' + r.code + ')'); return; }
+        refreshConvs(); showEmpty('Conversation closed.');
+      });
     });
     document.getElementById('hb-replyform').addEventListener('submit', function (ev) {
       ev.preventDefault();
@@ -131,7 +137,12 @@
       if (!text) return;
       box.value = '';
       appendMsg({ id: 0, sender: 'operator', body: text, sent_at: Math.floor(Date.now() / 1000) });
-      api('POST', '/api/admin/reply', { conv_id: c.id, body: text });
+      api('POST', '/api/admin/reply', { conv_id: c.id, body: text }).then(function (r) {
+        if (r.code === 200) { state.lastMsgId = Math.max(state.lastMsgId, r.body.id || 0); return; }
+        appendMsg({ id: 0, sender: 'system', body: 'Not delivered (' + (r.body.error || r.code) + '): ' + text });
+      }).catch(function () {
+        appendMsg({ id: 0, sender: 'system', body: 'Not delivered (network): ' + text });
+      });
     });
     document.getElementById('hb-replybox').addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter' && !ev.shiftKey) {

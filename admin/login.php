@@ -6,6 +6,7 @@ if ( Auth::loggedIn() )  { redirect( 'index.php' ); }
 
 $err = '';
 if ( $_SERVER['REQUEST_METHOD'] === 'POST' ) {
+	if ( ! rate_hit( 'login:' . client_ip(), 900, 10 ) ) { http_response_code( 429 ); exit( 'Too many attempts. Try again in 15 minutes.' ); }
 	csrf_check();
 	if ( Auth::login( (string) req( 'pass', '' ) ) ) { redirect( 'index.php' ); }
 	$err = 'Incorrect passphrase.';

@@ -29,7 +29,7 @@ through a third-party SaaS.
 
 ## What it is
 
-- One PHP tree + SQLite (same shape as [xmr-cart](../xmr-cart/))
+- One PHP tree + SQLite (same shape as [xmr-cart](https://git.subgenius.finance/SubGeniusFinance/xmr-cart))
 - One JS widget you drop on any page (`<script src="..." data-holler-id="..."></script>`)
 - One operator admin console, installable as a PWA on phone or desktop
 - Push notifications via VAPID (no Google/FCM/Apple middleman)
@@ -38,7 +38,7 @@ through a third-party SaaS.
 ## Design + scope
 
 See [DESIGN.md](DESIGN.md) for the full architecture, protocol, and MVP
-scope. Status is **scoping / greenfield** — no code yet.
+scope. Status: **MVP**. Install walkthrough in [deploy/install.md](deploy/install.md).
 
 ## Origin
 

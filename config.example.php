@@ -21,7 +21,7 @@ return array(
 
 	// ---- WebSocket ----------------------------------------------------------
 	// The ws-server.php long-running process binds here. Nginx should
-	// proxy_pass wss://<server_name>/ws/  →  this loopback address.
+	// `location /ws/ { proxy_pass http://<ws_bind>:<ws_port>; }` (no trailing slash).
 	'ws_bind'  => '127.0.0.1',
 	'ws_port'  => 8090,
 

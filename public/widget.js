@@ -109,6 +109,8 @@
     ws: null,
     unread: 0,
     lastMsgId: 0,
+    seen: {},        // message ids already on screen (own sends + server pushes)
+    started: false,  // conversation set up once per page load
     pollTimer: null,
     ident: (function () { try { return JSON.parse(localStorage.getItem(IDENT_KEY) || 'null'); } catch (e) { return null; } })(),
   };
@@ -131,13 +133,14 @@
     });
   }
   function appendMsg(m) {
-    if (m.id && m.id <= state.lastMsgId) return;
+    if (m.id && state.seen[m.id]) return;
+    if (m.id) state.seen[m.id] = true;
     var d = document.createElement('div');
     d.className = 'hb-m ' + (m.sender || 'system');
     d.textContent = m.body;
     els.log.appendChild(d);
     els.log.scrollTop = els.log.scrollHeight;
-    if (m.id) state.lastMsgId = Math.max(state.lastMsgId, m.id);
+    if (m.id && m.sender !== 'buyer') state.lastMsgId = Math.max(state.lastMsgId, m.id);
     if (!paneOpen() && m.sender === 'operator') setBadge(state.unread + 1);
   }
 
@@ -146,7 +149,7 @@
     pane.classList.add('on');
     btn.style.display = 'none';
     setBadge(0);
-    ensureConversation();
+    if (!state.started) { state.started = true; ensureConversation(); }
     setTimeout(function () { els.input.focus(); }, 50);
   });
   els.close.addEventListener('click', function () {
@@ -157,8 +160,12 @@
   /* ---------- conversation lifecycle ---------- */
   function ensureConversation() {
     if (state.convToken) { hydrate(); openWS(); return; }
-    api('/api/conversation/create', {}).then(function (r) {
-      if (r.code !== 200) { appendMsg({ sender: 'system', body: 'Could not start chat.' }); return; }
+    api('/api/conversation/create', {}).catch(function () { return { code: 0, body: {} }; }).then(function (r) {
+      if (r.code !== 200) {
+        appendMsg({ sender: 'system', body: r.code === 429 ? 'Too many chats started — try again later.' : 'Could not start chat.' });
+        state.started = false;
+        return;
+      }
       state.convToken = r.body.token;
       state.convId    = r.body.conv_id;
       try { localStorage.setItem(STORAGE_KEY, r.body.token); } catch (e) {}
@@ -205,7 +212,12 @@
   var reconnectDelay = 1000;
   function openWS() {
     if (!state.convToken) return;
-    if (state.ws) { try { state.ws.close(); } catch (e) {} state.ws = null; }
+    if (state.ws) {
+      // detach first so the old socket's onclose doesn't schedule another reconnect
+      state.ws.onclose = null; state.ws.onerror = null;
+      try { state.ws.close(); } catch (e) {}
+      state.ws = null;
+    }
     var url = wsBase + '/ws/widget/' + state.convToken + '?workspace=' + encodeURIComponent(workspaceId);
     var ws;
     try { ws = new WebSocket(url); } catch (e) { startPolling(); return; }
@@ -252,9 +264,10 @@
     // Optimistic append — the server won't echo our own message back
     appendMsg({ id: 0, sender: 'buyer', body: text, sent_at: Math.floor(Date.now() / 1000) });
     api('/api/message/send', { token: state.convToken, body: text }).then(function (r) {
-      if (r.code === 429) appendMsg({ sender: 'system', body: 'Too many messages — please slow down.' });
-      else if (r.code !== 200) appendMsg({ sender: 'system', body: 'Message failed to send.' });
-    });
+      if (r.code === 200) { if (r.body.id) state.seen[r.body.id] = true; }
+      else if (r.code === 429) appendMsg({ sender: 'system', body: 'Too many messages — please slow down.' });
+      else appendMsg({ sender: 'system', body: 'Message failed to send.' });
+    }).catch(function () { appendMsg({ sender: 'system', body: 'Message failed to send.' }); });
   });
   els.input.addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); els.form.requestSubmit(); }

@@ -49,7 +49,7 @@ class Workspace {
 		if ( $list === '' ) { return false; }
 		$origin = strtolower( trim( (string) $origin ) );
 		foreach ( preg_split( '/\s+/', $list ) as $entry ) {
-			$entry = strtolower( trim( $entry ) );
+			$entry = rtrim( strtolower( trim( $entry ) ), '/' );
 			if ( $entry === '' ) { continue; }
 			if ( $entry === '*' ) { return true; }
 			if ( $entry === $origin ) { return true; }

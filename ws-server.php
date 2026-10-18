@@ -3,7 +3,8 @@
  * Holler Back WebSocket process. Long-running under systemd.
  *
  * Bindings (see config.php: ws_bind / ws_port — default 127.0.0.1:8090):
- *   Nginx proxy_pass wss://<host>/ws/  →  http://127.0.0.1:8090/
+ *   Nginx `location /ws/ { proxy_pass http://127.0.0.1:8090; }` — NO trailing
+ *   slash on proxy_pass: routes below match on the full /ws/... path.
  *
  * Endpoints:
  *   GET /ws/widget/<conv_token>?workspace=<install_token>  — buyer's socket
@@ -11,8 +12,8 @@
  *
  *   POST /_internal/publish                                — loopback-only.
  *     Called by public/api.php after any DB write that other sockets should
- *     see. Body is JSON {type, workspace_id, conv_id, ...}. We refuse if the
- *     source address isn't loopback.
+ *     see. Body is JSON {type, workspace_id, conv_id, ...}. We refuse unless
+ *     the source is loopback AND the X-HB-Internal secret matches.
  *
  * Implementation notes:
  *   - Hand-rolled RFC 6455. No Ratchet, no Composer. Text frames only; ping/pong
@@ -39,6 +40,11 @@ class HollerWsServer {
 	private $listener;              // resource, listening socket
 	private $clients = array();     // fd_id => [socket, buf, state, endpoint_meta]
 	private $stopping = false;
+
+	const MAX_CLIENTS      = 800;   // stay well under stream_select's 1024-fd ceiling
+	const MAX_PER_CONV     = 3;     // widget sockets per conversation
+	const HANDSHAKE_SECS   = 10;    // drop clients that never finish the HTTP head / body
+	const MAX_INTERNAL_BODY = 262144;
 
 	public function __construct() {
 		$this->bind = (string) Config::get( 'ws_bind', '127.0.0.1' );
@@ -71,11 +77,15 @@ class HollerWsServer {
 			$excepts = null;
 
 			$n = @stream_select( $reads, $writes, $excepts, 1, 0 );
-			if ( $n === false ) { continue; }
+			if ( $n === false ) { usleep( 100000 ); continue; }
 
 			// Accept
 			if ( in_array( $this->listener, $reads, true ) ) {
 				$peer = @stream_socket_accept( $this->listener, 0, $peername );
+				if ( $peer && count( $this->clients ) >= self::MAX_CLIENTS ) {
+					@fclose( $peer );
+					$peer = false;
+				}
 				if ( $peer ) {
 					stream_set_blocking( $peer, false );
 					$id = (int) $peer;
@@ -85,6 +95,7 @@ class HollerWsServer {
 						'state' => 'handshake',      // handshake | ws | internal
 						'peer'  => $peername,
 						'meta'  => array(),
+						'since' => time(),
 					);
 				}
 			}
@@ -105,11 +116,13 @@ class HollerWsServer {
 				}
 			}
 
-			// Periodic housekeeping — ping open WS every 30s so idle NATs don't reap.
+			// Periodic housekeeping — ping open WS every 30s so idle NATs don't reap,
+			// and drop anything stuck before the upgrade.
 			if ( time() - $lastKeepalive > 30 ) {
 				$lastKeepalive = time();
 				foreach ( $this->clients as $id => $c ) {
 					if ( $c['state'] === 'ws' ) { $this->sendFrame( $id, '', 0x9 ); } // ping
+					elseif ( time() - $c['since'] > self::HANDSHAKE_SECS ) { $this->drop( $id ); }
 				}
 			}
 		}
@@ -136,7 +149,11 @@ class HollerWsServer {
 			return;
 		}
 		if ( $c['state'] === 'internal' ) {
-			// Waiting for HTTP body; buf already contains headers + partial body
+			// Waiting for the rest of the HTTP body
+			$c['meta']['body'] .= $c['buf'];
+			$c['buf'] = '';
+			if ( strlen( $c['meta']['body'] ) > self::MAX_INTERNAL_BODY ) { $this->httpAbort( $id, 400 ); return; }
+			$this->flushInternal( $id );
 			return;
 		}
 		if ( $c['state'] === 'ws' ) {
@@ -162,13 +179,16 @@ class HollerWsServer {
 
 		// Internal publish path — loopback only, no WS upgrade
 		if ( $method === 'POST' && $uri === '/_internal/publish' ) {
-			if ( ! $this->isLoopback( $this->clients[ $id ]['peer'] ?? '' ) ) {
+			if ( ! $this->isLoopback( $this->clients[ $id ]['peer'] ?? '' )
+				|| ! hash_equals( internal_secret(), (string) ( $headers['x-hb-internal'] ?? '' ) ) ) {
 				$this->httpAbort( $id, 403 ); return;
 			}
 			$need = (int) ( $headers['content-length'] ?? 0 );
+			if ( $need > self::MAX_INTERNAL_BODY ) { $this->httpAbort( $id, 400 ); return; }
 			$body = $rest;
 			// buffer more if we don't have the whole body yet
 			$this->clients[ $id ]['state'] = 'internal';
+			$this->clients[ $id ]['buf']   = '';
 			$this->clients[ $id ]['meta']  = array( 'need' => $need, 'body' => $body );
 			$this->flushInternal( $id );
 			return;
@@ -222,6 +242,11 @@ class HollerWsServer {
 				array( (int) $ws['id'], $conv_tok )
 			);
 			if ( ! $conv ) { return array( 'error' => 'no_conv', 'status' => 404 ); }
+			$open = 0;
+			foreach ( $this->clients as $c ) {
+				if ( $c['state'] === 'ws' && ( $c['meta']['kind'] ?? '' ) === 'widget' && (int) $c['meta']['conv_id'] === (int) $conv['id'] ) { $open++; }
+			}
+			if ( $open >= self::MAX_PER_CONV ) { return array( 'error' => 'too_many', 'status' => 429 ); }
 			return array(
 				'kind'          => 'widget',
 				'workspace_id'  => (int) $ws['id'],
@@ -300,7 +325,12 @@ class HollerWsServer {
 				}
 			}
 			if ( ! $adminOnline ) {
-				Push::fanoutNewMessage( $wsId, $convId, (string) ( $env['msg']['body'] ?? '' ) );
+				// Blocks the loop for the duration (curl timeout is short); never let it kill the process.
+				try {
+					Push::fanoutNewMessage( $wsId, $convId, (string) ( $env['msg']['body'] ?? '' ) );
+				} catch ( Throwable $e ) {
+					hb_log( 'ws-server: push failed: ' . $e->getMessage() );
+				}
 			}
 		}
 	}
@@ -318,7 +348,7 @@ class HollerWsServer {
 
 	private function httpRespond( $id, $code, $body ) {
 		$statusText = array( 200 => 'OK', 204 => 'No Content', 400 => 'Bad Request', 401 => 'Unauthorized',
-			403 => 'Forbidden', 404 => 'Not Found', 405 => 'Method Not Allowed', 426 => 'Upgrade Required',
+			403 => 'Forbidden', 404 => 'Not Found', 405 => 'Method Not Allowed', 426 => 'Upgrade Required', 429 => 'Too Many Requests',
 			431 => 'Request Header Fields Too Large' );
 		$st = $statusText[ $code ] ?? 'Error';
 		$resp = "HTTP/1.1 $code $st\r\nContent-Length: " . strlen( (string) $body ) . "\r\nConnection: close\r\n\r\n" . $body;
@@ -398,7 +428,7 @@ class HollerWsServer {
 	}
 
 	private function sendJson( $id, $obj ) {
-		$this->sendFrame( $id, json_encode( $obj ), 0x1 );
+		$this->sendFrame( $id, json_encode( $obj, JSON_UNESCAPED_UNICODE ), 0x1 );
 	}
 
 	private function sendFrame( $id, $payload, $opcode = 0x1 ) {

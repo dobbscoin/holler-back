@@ -44,6 +44,8 @@ function widget_workspace() {
 	if ( ! $ws ) { json_out( array( 'error' => 'unknown_workspace' ), 404 ); }
 	$origin = isset( $_SERVER['HTTP_ORIGIN'] ) ? (string) $_SERVER['HTTP_ORIGIN'] : '';
 	if ( ! Workspace::originAllowed( $ws, $origin ) ) {
+		// CORS header on the refusal too, so the widget sees a 403 rather than a CORS TypeError
+		if ( $origin !== '' ) { header( 'Access-Control-Allow-Origin: ' . $origin ); header( 'Vary: Origin' ); }
 		json_out( array( 'error' => 'origin_not_allowed', 'origin' => $origin ), 403 );
 	}
 	// CORS: allow the exact origin that just passed the allowlist
@@ -68,10 +70,10 @@ function notify_ws( $envelope ) {
 	$port = (int) Config::get( 'ws_port', 8090 );
 	$fp = @stream_socket_client( "tcp://$bind:$port", $errno, $errstr, 0.5 );
 	if ( ! $fp ) { hb_log( "notify_ws: dial $bind:$port failed: $errstr ($errno)" ); return; }
-	$payload = json_encode( $envelope );
-	// Simple internal protocol: line = "PUB <json>\n"; the WS process reads
-	// these off a listener on a dedicated local port. See ws-server.php.
-	$hdr = "POST /_internal/publish HTTP/1.1\r\nHost: local\r\nContent-Length: " . strlen( $payload ) . "\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+	$payload = json_encode( $envelope, JSON_UNESCAPED_UNICODE );
+	// Internal protocol: one HTTP POST to /_internal/publish on the WS port,
+	// authenticated by a secret derived from cookie_secret. See ws-server.php.
+	$hdr = "POST /_internal/publish HTTP/1.1\r\nHost: local\r\nX-HB-Internal: " . internal_secret() . "\r\nContent-Length: " . strlen( $payload ) . "\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
 	@fwrite( $fp, $hdr . $payload );
 	@fclose( $fp );
 }
@@ -94,6 +96,9 @@ preflight();
 if ( $path === 'conversation/create' ) {
 	need_method( 'POST' );
 	list( $ws, $body ) = widget_workspace();
+	if ( ! rate_hit( 'ip:' . client_ip() . ':create', 3600, 20 ) ) {
+		json_out( array( 'error' => 'rate_limited' ), 429 );
+	}
 	$now = time();
 	$tok = new_token( 16 );
 	$ip  = client_ip();
@@ -149,7 +154,7 @@ if ( $path === 'message/send' ) {
 	if ( mb_strlen( $body_text ) > $max ) { $body_text = mb_substr( $body_text, 0, $max ); }
 
 	$limit = (int) Config::get( 'max_msgs_per_min_per_conv', 20 );
-	if ( ! rate_hit( 'conv:' . $conv['id'] . ':msgs', 60, $limit ) ) {
+	if ( ! rate_hit( 'conv:' . $conv['id'] . ':msgs', 60, $limit ) || ! rate_hit( 'ip:' . client_ip() . ':send', 60, 30 ) ) {
 		json_out( array( 'error' => 'rate_limited' ), 429 );
 	}
 
@@ -213,6 +218,7 @@ if ( strpos( $path, 'admin/' ) === 0 ) {
 		$p256 = (string) ( $body['keys']['p256dh'] ?? '' );
 		$auth = (string) ( $body['keys']['auth'] ?? '' );
 		if ( $ep === '' || $p256 === '' || $auth === '' ) { json_out( array( 'error' => 'incomplete' ), 400 ); }
+		if ( strpos( $ep, 'https://' ) !== 0 || strlen( $ep ) > 1024 ) { json_out( array( 'error' => 'bad_endpoint' ), 400 ); }
 		$ws = Workspace::primary();
 		if ( ! $ws ) { json_out( array( 'error' => 'no_workspace' ), 400 ); }
 		store()->q(
