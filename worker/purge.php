@@ -21,5 +21,7 @@ $m = store()->q(
 	array( time() - 86400 )
 )->rowCount();
 
+store()->q( 'DELETE FROM notify_outbox WHERE done_at > 0 AND done_at < ?', array( time() - 86400 ) );
+
 hb_log( "purge: dropped $n conversations older than {$days}d, $m rate buckets" );
 echo "purged $n conversations, $m rate buckets\n";

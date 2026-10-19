@@ -11,6 +11,7 @@ class Store {
 		$this->db->setAttribute( PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION );
 		$this->db->setAttribute( PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC );
 		$this->db->exec( 'PRAGMA journal_mode=WAL' );
+		$this->db->exec( 'PRAGMA busy_timeout=5000' ); // api, ws-server and the notify worker all write
 		$this->db->exec( 'PRAGMA foreign_keys=ON' );
 		$this->migrate();
 	}
@@ -69,7 +70,22 @@ class Store {
 				window_start INTEGER NOT NULL,
 				count INTEGER NOT NULL
 			);
-			CREATE TABLE IF NOT EXISTS kv ( k TEXT PRIMARY KEY, v TEXT NOT NULL, updated_at INTEGER NOT NULL );'
+			CREATE TABLE IF NOT EXISTS kv ( k TEXT PRIMARY KEY, v TEXT NOT NULL, updated_at INTEGER NOT NULL );
+			CREATE TABLE IF NOT EXISTS notify_outbox (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				workspace_id INTEGER NOT NULL,
+				kind TEXT NOT NULL,                     -- push | push_test
+				payload TEXT NOT NULL,                  -- JSON
+				created_at INTEGER NOT NULL,
+				done_at INTEGER NOT NULL DEFAULT 0
+			);
+			CREATE INDEX IF NOT EXISTS idx_outbox_pending ON notify_outbox(done_at, id);
+			CREATE TABLE IF NOT EXISTS notify_conv (
+				conv_id INTEGER PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+				discord_msg_id INTEGER NOT NULL DEFAULT 0, -- newest buyer message already announced to Discord
+				discord_at INTEGER NOT NULL DEFAULT 0,
+				away_at INTEGER NOT NULL DEFAULT 0      -- when the away message was posted (once per conversation)
+			);'
 		);
 	}
 

@@ -1,0 +1,24 @@
+[Unit]
+Description=Holler Back notification worker (Web Push, Discord, away message)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/holler-back
+ExecStart=/usr/bin/php /var/www/holler-back/worker/notify.php
+Restart=on-failure
+RestartSec=3
+StandardOutput=append:/var/log/holler-back.log
+StandardError=append:/var/log/holler-back.log
+
+# Needs outbound HTTPS (push services, Discord) and read/write on data/ — nothing else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/www/holler-back/data
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

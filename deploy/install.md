@@ -36,14 +36,17 @@ sudo apt install php8.3-cli php8.3-fpm php8.3-sqlite3 php8.3-gmp php8.3-curl php
 `pcntl` is used by `ws-server.php` for SIGTERM handling — it's built into
 the CLI SAPI on Debian/Ubuntu, no separate package needed.
 
-## 3. WebSocket process — systemd
+## 3. WebSocket process + notification worker — systemd
 
 ```bash
-sudo cp deploy/holler-back.service /etc/systemd/system/
+sudo cp deploy/holler-back.service deploy/holler-back-notify.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now holler-back
-sudo systemctl status holler-back
+sudo systemctl enable --now holler-back holler-back-notify
+sudo systemctl status holler-back holler-back-notify
 ```
+
+`holler-back-notify` sends Web Push, Discord alerts and the away message.
+Without it chat still works, but nothing notifies you.
 
 If it fails to start, check:
 
@@ -114,17 +117,37 @@ On phone:
   click **Enable push**. Push doesn't work from the browser tab itself on
   iOS — only from the installed PWA.
 
+Push only fires when no console window is on screen. A console left open in a
+background tab or a minimized window doesn't block it. Settings → Notifications
+→ **Send push test** checks every subscribed device.
+
+## 8b. Discord alerts and the away message (optional)
+
+Settings → **Notifications**:
+
+- **Discord webhook URL**: in Discord, open the channel's settings →
+  Integrations → Webhooks → New Webhook → Copy Webhook URL, then paste it here
+  and click **Save**, then **Send Discord test**. Once saved, the URL is shown
+  masked and never sent back to the browser (anyone with it can post to that
+  channel).
+- **New conversations** pings when a buyer first writes. **Unanswered messages
+  after N minutes** pings once per unanswered stretch. **Include the buyer's
+  message text** is off by default, so the channel sees only a name and a link.
+- **Away message**: if nobody replies within N minutes, this text is posted
+  into the buyer's chat once per conversation. Links in it are clickable, e.g.
+  a Discord invite or a contact page.
+
 ## 9. Verify end-to-end
 
 1. Visit any page with your widget snippet. Click the bubble, enter a name,
    send a message.
 2. In the admin console the conversation shows up on the left in real time.
 3. Reply from the console. Buyer sees the reply live.
-4. Close the admin tab. Send another message from the widget. Your phone
-   buzzes.
+4. Close (or switch away from) the admin tab. Send another message from the
+   widget. Your phone buzzes.
 
-If step 4 doesn't work, first check `sudo tail /var/log/holler-back.log`
-for `push:` lines — non-2xx from the push provider (Google/Apple/Mozilla)
+If step 4 doesn't work, first check `systemctl status holler-back-notify`, then
+`sudo tail /var/log/holler-back.log` for `push:` and `notify:` lines — non-2xx from the push provider (Google/Apple/Mozilla)
 is logged with the status code and body preview.
 
 ## Troubleshooting

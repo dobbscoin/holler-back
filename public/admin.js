@@ -32,6 +32,7 @@
       ws.onopen = function () {
         setConn('online');
         state.reconnectDelay = 1000;
+        sendPresence();
       };
       ws.onmessage = function (ev) {
         var env; try { env = JSON.parse(ev.data); } catch (e) { return; }
@@ -45,6 +46,15 @@
       ws.onerror = function () { try { ws.close(); } catch (e) {} };
     });
   }
+  // Tell the server whether this console is on screen: push is skipped only
+  // while one is visible, so a forgotten background tab doesn't swallow alerts.
+  function sendPresence() {
+    if (state.ws && state.ws.readyState === 1) {
+      state.ws.send(JSON.stringify({ type: 'presence', visible: document.visibilityState === 'visible' }));
+    }
+  }
+  document.addEventListener('visibilitychange', sendPresence);
+
   function setConn(s) {
     var el = document.getElementById('hb-conn');
     if (!el) return;
@@ -200,10 +210,29 @@
     var btn = document.getElementById('hb-pushbtn');
     if (!btn) return;
     btn.style.display = '';
+    var on = false;
+    function show(v) { on = v; btn.textContent = v ? 'Push on' : 'Enable push'; btn.title = v ? 'Click to turn push off on this device' : ''; }
+    // Reflect the real state: an existing subscription means push is on. Re-send
+    // it so a server that pruned it picks it up again.
+    navigator.serviceWorker.getRegistration('/sw.js').then(function (reg) {
+      if (!reg || Notification.permission !== 'granted') return null;
+      return reg.pushManager.getSubscription();
+    }).then(function (sub) {
+      if (!sub) return;
+      show(true);
+      api('POST', '/api/admin/subscribe', JSON.parse(JSON.stringify(sub)));
+    }).catch(function () {});
     btn.addEventListener('click', function () {
-      subscribeToPush().then(function (ok) {
-        btn.textContent = ok ? 'Push enabled' : 'Enable push';
-        if (ok) btn.disabled = true;
+      if (!on) { subscribeToPush().then(show); return; }
+      if (!confirm('Turn off push notifications on this device?')) return;
+      navigator.serviceWorker.getRegistration('/sw.js').then(function (reg) {
+        return reg && reg.pushManager.getSubscription();
+      }).then(function (sub) {
+        if (!sub) { show(false); return; }
+        var ep = sub.endpoint;
+        return sub.unsubscribe().then(function () {
+          return api('POST', '/api/admin/unsubscribe', { endpoint: ep });
+        }).then(function () { show(false); });
       });
     });
   }
@@ -227,6 +256,45 @@
   }
 
   /* --------- utils --------- */
+  /* --------- Notifications settings --------- */
+  function bindNotify() {
+    var f = document.getElementById('hb-notifyform');
+    if (!f) return;
+    var msg = document.getElementById('hb-notifymsg');
+    function say(ok, text) { msg.innerHTML = '<div class="' + (ok ? 'hb-ok' : 'hb-err') + '">' + escape(text) + '</div>'; }
+    var errors = {
+      bad_discord_url: 'That is not a Discord webhook URL (https://discord.com/api/webhooks/…).',
+      no_webhook: 'Save a webhook URL first.',
+      no_devices: 'No devices yet: click Enable push on each device first.',
+      rate_limited: 'Slow down: try again in a minute.',
+    };
+    f.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var body = {};
+      Array.from(f.elements).forEach(function (el) {
+        if (!el.name) return;
+        body[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+      });
+      api('POST', '/api/admin/notify/save', body).then(function (r) {
+        if (r.code !== 200) { say(false, errors[r.body.error] || 'Save failed.'); return; }
+        // Reload so the masked webhook hint and Remove box reflect what was saved
+        location.reload();
+      });
+    });
+    document.getElementById('hb-discordtest').addEventListener('click', function () {
+      api('POST', '/api/admin/notify/test', {}).then(function (r) {
+        if (r.code === 200) { say(true, 'Sent: check your Discord channel.'); return; }
+        say(false, errors[r.body.error] || ('Discord said: HTTP ' + (r.body.code || r.code) + ' ' + (r.body.error || '')));
+      });
+    });
+    document.getElementById('hb-pushtest').addEventListener('click', function () {
+      api('POST', '/api/admin/push-test', {}).then(function (r) {
+        if (r.code === 200) { say(true, 'Queued for ' + r.body.devices + ' device(s): it should arrive within a few seconds.'); return; }
+        say(false, errors[r.body.error] || 'Push test failed.');
+      });
+    });
+  }
+
   function escape(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -255,6 +323,6 @@
       setTimeout(function () { clearInterval(iv); }, 5000);
     }
   }
-  if (HB.tab === 'settings') { bindSettings(); }
+  if (HB.tab === 'settings') { bindSettings(); bindNotify(); }
   bindPushBtn();
 })();

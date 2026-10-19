@@ -96,6 +96,23 @@ function rate_hit( $key, $windowSec, $limit ) {
 	return true;
 }
 
+/* ---- Publish to the WS process ------------------------------------------ */
+function notify_ws( $envelope ) {
+	// Push an event into the WS process via its local admin socket. If the
+	// process is down we just log and move on — nothing is lost, the admin
+	// will see the message next time they poll /api/admin/conversations.
+	$bind = (string) Config::get( 'ws_bind', '127.0.0.1' );
+	$port = (int) Config::get( 'ws_port', 8090 );
+	$fp = @stream_socket_client( "tcp://$bind:$port", $errno, $errstr, 0.5 );
+	if ( ! $fp ) { hb_log( "notify_ws: dial $bind:$port failed: $errstr ($errno)" ); return; }
+	$payload = json_encode( $envelope, JSON_UNESCAPED_UNICODE );
+	// Internal protocol: one HTTP POST to /_internal/publish on the WS port,
+	// authenticated by a secret derived from cookie_secret. See ws-server.php.
+	$hdr = "POST /_internal/publish HTTP/1.1\r\nHost: local\r\nX-HB-Internal: " . internal_secret() . "\r\nContent-Length: " . strlen( $payload ) . "\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+	@fwrite( $fp, $hdr . $payload );
+	@fclose( $fp );
+}
+
 /* ---- Logging ------------------------------------------------------------- */
 function hb_log( $line ) {
 	$path = (string) Config::get( 'log_path', '' );

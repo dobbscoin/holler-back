@@ -33,6 +33,7 @@ through a third-party SaaS.
 - One JS widget you drop on any page (`<script src="..." data-holler-id="..."></script>`)
 - One operator admin console, installable as a PWA on phone or desktop
 - Push notifications via VAPID (no Google/FCM/Apple middleman)
+- Optional Discord alerts (a channel webhook) and an away message for buyers, set in the console
 - Origin-locked so your widget can only be embedded on domains you allow
 
 ## Design + scope

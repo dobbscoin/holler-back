@@ -18,6 +18,9 @@
  *   POST /api/admin/reply                  — operator replies on a conversation
  *   POST /api/admin/close                  — mark a conversation closed
  *   GET  /api/admin/ws-token               — mint a short-lived WS token for the admin socket
+ *   POST /api/admin/notify/save            — Discord webhook, triggers, away message
+ *   POST /api/admin/notify/test            — post a sample to the saved Discord webhook now
+ *   POST /api/admin/push-test              — queue a test push to every subscribed device
  */
 
 require_once __DIR__ . '/../lib/bootstrap.php';
@@ -62,21 +65,6 @@ function widget_conversation( $ws, $token ) {
 	if ( ! $conv ) { json_out( array( 'error' => 'unknown_conversation' ), 404 ); }
 	return $conv;
 }
-function notify_ws( $envelope ) {
-	// Push an event into the WS process via its local admin socket. If the
-	// process is down we just log and move on — nothing is lost, the admin
-	// will see the message next time they poll /api/admin/conversations.
-	$bind = (string) Config::get( 'ws_bind', '127.0.0.1' );
-	$port = (int) Config::get( 'ws_port', 8090 );
-	$fp = @stream_socket_client( "tcp://$bind:$port", $errno, $errstr, 0.5 );
-	if ( ! $fp ) { hb_log( "notify_ws: dial $bind:$port failed: $errstr ($errno)" ); return; }
-	$payload = json_encode( $envelope, JSON_UNESCAPED_UNICODE );
-	// Internal protocol: one HTTP POST to /_internal/publish on the WS port,
-	// authenticated by a secret derived from cookie_secret. See ws-server.php.
-	$hdr = "POST /_internal/publish HTTP/1.1\r\nHost: local\r\nX-HB-Internal: " . internal_secret() . "\r\nContent-Length: " . strlen( $payload ) . "\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
-	@fwrite( $fp, $hdr . $payload );
-	@fclose( $fp );
-}
 function preflight() {
 	if ( $_SERVER['REQUEST_METHOD'] === 'OPTIONS' ) {
 		$origin = isset( $_SERVER['HTTP_ORIGIN'] ) ? (string) $_SERVER['HTTP_ORIGIN'] : '*';
@@ -117,6 +105,7 @@ if ( $path === 'conversation/create' ) {
 		'INSERT INTO messages(conversation_id, sender, body, sent_at) VALUES(?,?,?,?)',
 		array( $conv_id, 'system', $greet, $now )
 	);
+	$greet_id = (int) store()->db->lastInsertId();
 
 	notify_ws( array( 'type' => 'conversation.created', 'workspace_id' => (int) $ws['id'], 'conv_id' => $conv_id, 'token' => $tok ) );
 
@@ -125,6 +114,7 @@ if ( $path === 'conversation/create' ) {
 		'conv_id'      => $conv_id,
 		'operator_name' => (string) $ws['operator_name'],
 		'greeting'     => $greet,
+		'greeting_id'  => $greet_id,
 	) );
 }
 
@@ -345,6 +335,61 @@ if ( strpos( $path, 'admin/' ) === 0 ) {
 			array( $display, $operator, $origins, (int) $ws['id'] )
 		);
 		json_out( array( 'ok' => true ) );
+	}
+
+	if ( $tail === 'notify/save' ) {
+		need_method( 'POST' );
+		csrf_check();
+		require_once __DIR__ . '/../lib/Notify.php';
+		$body = json_in();
+		$ws = Workspace::primary();
+		if ( ! $ws ) { json_out( array( 'error' => 'no_workspace' ), 400 ); }
+		$s = Notify::settings( $ws['id'] );
+		// The saved URL is never sent back to the browser: blank means "keep it".
+		$url = trim( (string) ( $body['discord_url'] ?? '' ) );
+		if ( ! empty( $body['discord_remove'] ) ) {
+			$s['discord_url'] = '';
+		} elseif ( $url !== '' ) {
+			if ( ! Notify::validDiscordUrl( $url ) ) { json_out( array( 'error' => 'bad_discord_url' ), 400 ); }
+			if ( $url !== $s['discord_url'] ) { $s['since'] = time(); }
+			$s['discord_url'] = $url;
+		}
+		$s['include_text']   = ! empty( $body['include_text'] );
+		$s['on_new']         = ! empty( $body['on_new'] );
+		$s['on_unanswered']  = ! empty( $body['on_unanswered'] );
+		$s['unanswered_min'] = max( 1, min( 1440, (int) ( $body['unanswered_min'] ?? 3 ) ) );
+		$s['away_text']      = mb_substr( trim( (string) ( $body['away_text'] ?? '' ) ), 0, 1000 );
+		$s['away_min']       = max( 1, min( 1440, (int) ( $body['away_min'] ?? 5 ) ) );
+		Notify::save( $ws['id'], $s );
+		json_out( array( 'ok' => true, 'discord_hint' => Notify::urlHint( $s['discord_url'] ) ) );
+	}
+
+	if ( $tail === 'notify/test' ) {
+		need_method( 'POST' );
+		csrf_check();
+		require_once __DIR__ . '/../lib/Notify.php';
+		$ws = Workspace::primary();
+		if ( ! $ws ) { json_out( array( 'error' => 'no_workspace' ), 400 ); }
+		if ( ! rate_hit( 'notify-test', 60, 5 ) ) { json_out( array( 'error' => 'rate_limited' ), 429 ); }
+		$s = Notify::settings( $ws['id'] );
+		if ( $s['discord_url'] === '' ) { json_out( array( 'error' => 'no_webhook' ), 400 ); }
+		$where = (string) ( $ws['display_name'] ?: 'your site' );
+		$res = Notify::discordPost( $s['discord_url'], "🔔 Test from Holler Back ($where). Chat alerts will land in this channel." );
+		Notify::recordStatus( $ws['id'], $res );
+		json_out( $res, $res['ok'] ? 200 : 502 );
+	}
+
+	if ( $tail === 'push-test' ) {
+		need_method( 'POST' );
+		csrf_check();
+		require_once __DIR__ . '/../lib/Notify.php';
+		$ws = Workspace::primary();
+		if ( ! $ws ) { json_out( array( 'error' => 'no_workspace' ), 400 ); }
+		if ( ! rate_hit( 'push-test', 60, 5 ) ) { json_out( array( 'error' => 'rate_limited' ), 429 ); }
+		$n = (int) store()->one( 'SELECT COUNT(*) AS n FROM push_subscriptions WHERE workspace_id = ?', array( (int) $ws['id'] ) )['n'];
+		if ( ! $n ) { json_out( array( 'error' => 'no_devices' ), 400 ); }
+		Notify::enqueue( $ws['id'], 'push_test', array() );
+		json_out( array( 'ok' => true, 'devices' => $n ) );
 	}
 
 	json_out( array( 'error' => 'unknown_admin_endpoint', 'path' => $tail ), 404 );

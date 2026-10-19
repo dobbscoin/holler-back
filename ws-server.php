@@ -31,7 +31,7 @@
  */
 
 require_once __DIR__ . '/lib/bootstrap.php';
-require_once __DIR__ . '/lib/Push.php';
+require_once __DIR__ . '/lib/Notify.php';
 
 class HollerWsServer {
 
@@ -313,23 +313,23 @@ class HollerWsServer {
 			}
 		}
 
-		// Web Push fan-out — only for buyer→operator new messages, and only if
-		// no admin socket is currently connected for this workspace.
+		// Web Push — only for buyer messages, and only when no console is on
+		// screen. A connected-but-hidden tab doesn't count. The worker sends it.
 		if ( $type === 'message.new' && ( $env['msg']['sender'] ?? '' ) === 'buyer' ) {
-			$adminOnline = false;
+			$watching = false;
 			foreach ( $this->clients as $c ) {
 				if ( $c['state'] === 'ws'
 					&& ( $c['meta']['kind'] ?? '' ) === 'admin'
-					&& (int) ( $c['meta']['workspace_id'] ?? 0 ) === $wsId ) {
-					$adminOnline = true; break;
+					&& (int) ( $c['meta']['workspace_id'] ?? 0 ) === $wsId
+					&& ! empty( $c['meta']['visible'] ) ) {
+					$watching = true; break;
 				}
 			}
-			if ( ! $adminOnline ) {
-				// Blocks the loop for the duration (curl timeout is short); never let it kill the process.
+			if ( ! $watching ) {
 				try {
-					Push::fanoutNewMessage( $wsId, $convId, (string) ( $env['msg']['body'] ?? '' ) );
+					Notify::enqueue( $wsId, 'push', array( 'conv_id' => $convId, 'body' => mb_substr( (string) ( $env['msg']['body'] ?? '' ), 0, 140 ) ) );
 				} catch ( Throwable $e ) {
-					hb_log( 'ws-server: push failed: ' . $e->getMessage() );
+					hb_log( 'ws-server: push enqueue failed: ' . $e->getMessage() );
 				}
 			}
 		}
@@ -420,9 +420,11 @@ class HollerWsServer {
 		$j = json_decode( $text, true );
 		if ( ! is_array( $j ) ) { return; }
 		$type = (string) ( $j['type'] ?? '' );
-		// For MVP the browser doesn't need to send anything over WS — messages
-		// go via POST /api/message/send. We still accept a "ping" for symmetry.
-		if ( $type === 'ping' ) {
+		// Messages go via POST /api/message/send. Over WS the browser only sends
+		// "ping", and the console reports whether it is on screen ("presence").
+		if ( $type === 'presence' && ( $this->clients[ $id ]['meta']['kind'] ?? '' ) === 'admin' ) {
+			$this->clients[ $id ]['meta']['visible'] = ! empty( $j['visible'] );
+		} elseif ( $type === 'ping' ) {
 			$this->sendJson( $id, array( 'type' => 'pong', 't' => time() ) );
 		}
 	}

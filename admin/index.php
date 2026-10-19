@@ -9,6 +9,12 @@ $server_url = h( (string) Config::get( 'server_url', '' ) );
 $widget_snippet = '<script src="' . $server_url . '/widget.js"' . "\n" . '        data-holler-id="' . h( $ws['install_token'] ) . '"' . "\n" . '        async defer></script>';
 
 $tab = (string) req( 'tab', 'inbox' );
+if ( $tab === 'settings' ) {
+	require_once dirname( __DIR__ ) . '/lib/Notify.php';
+	$ns = Notify::settings( $ws['id'] );
+	$nstatus = Notify::status( $ws['id'] );
+	$ndevices = (int) store()->one( 'SELECT COUNT(*) AS n FROM push_subscriptions WHERE workspace_id = ?', array( (int) $ws['id'] ) )['n'];
+}
 $is_ios_safari = is_ios_safari( $_SERVER['HTTP_USER_AGENT'] ?? '' );
 
 admin_head( 'Console' );
@@ -63,6 +69,37 @@ admin_head( 'Console' );
 				installed PWA (iOS 16.4+).
 			</div>
 			<?php endif ?>
+		</div>
+		<div class="hb-card">
+			<h2>Notifications</h2>
+			<div id="hb-notifymsg"></div>
+			<form id="hb-notifyform">
+				<h3>Discord</h3>
+				<label>Webhook URL <span class="hint">(Discord: channel settings → Integrations → Webhooks → Copy URL)</span></label>
+				<input type="url" name="discord_url" autocomplete="off" placeholder="<?= $ns['discord_url'] !== '' ? h( 'Saved: ' . Notify::urlHint( $ns['discord_url'] ) . ' (paste a new one to replace)' ) : 'https://discord.com/api/webhooks/…' ?>">
+				<label class="ck"><input type="checkbox" name="on_new" <?= $ns['on_new'] ? 'checked' : '' ?>> New conversations</label>
+				<label class="ck"><input type="checkbox" name="on_unanswered" <?= $ns['on_unanswered'] ? 'checked' : '' ?>> Unanswered messages after <input class="n" type="number" name="unanswered_min" min="1" max="1440" value="<?= (int) $ns['unanswered_min'] ?>"> minutes</label>
+				<label class="ck"><input type="checkbox" name="include_text" <?= $ns['include_text'] ? 'checked' : '' ?>> Include the buyer's message text <span class="hint">(off = name and link only)</span></label>
+				<?php if ( $ns['discord_url'] !== '' ) : ?>
+				<label class="ck"><input type="checkbox" name="discord_remove"> Remove the saved webhook</label>
+				<?php endif ?>
+				<p class="hint" id="hb-discordstatus"><?php
+					if ( $nstatus && $ns['discord_url'] !== '' ) {
+						echo h( ( $nstatus['ok'] ? '✓ Last delivery ' : '✗ Last delivery failed ' ) . gmdate( 'Y-m-d H:i', (int) $nstatus['at'] ) . ' UTC (HTTP ' . (int) $nstatus['code'] . ( $nstatus['ok'] ? '' : ', ' . $nstatus['error'] ) . ')' );
+					} elseif ( $ns['discord_url'] !== '' ) {
+						echo 'Nothing sent yet.';
+					}
+				?></p>
+
+				<h3>Away message</h3>
+				<label>If nobody replies within <input class="n" type="number" name="away_min" min="1" max="1440" value="<?= (int) $ns['away_min'] ?>"> minutes, post this in the chat (blank = off). Links are clickable.</label>
+				<textarea name="away_text" maxlength="1000" placeholder="Nobody's at the desk right now. Leave your email and we'll get back to you."><?= h( $ns['away_text'] ) ?></textarea>
+
+				<button type="submit" class="p">Save</button>
+				<button type="button" class="s" id="hb-discordtest">Send Discord test</button>
+				<button type="button" class="s" id="hb-pushtest">Send push test</button>
+				<p class="hint">Push goes to <?= $ndevices ?> device<?= $ndevices === 1 ? '' : 's' ?> (use Enable push on each), and only when no console window is on screen.</p>
+			</form>
 		</div>
 <?php endif ?>
 	</div>

@@ -45,6 +45,7 @@
     '.hb-m{margin:6px 0;padding:8px 10px;border-radius:10px;max-width:80%;word-wrap:break-word}',
     '.hb-m.buyer{background:#2f6feb;color:#fff;margin-left:auto;border-bottom-right-radius:2px}',
     '.hb-m.operator{background:#fff;color:#222;border:1px solid #e2e5ee;border-bottom-left-radius:2px}',
+    '.hb-m a{color:inherit;text-decoration:underline;word-break:break-all}',
     '.hb-m.system{background:transparent;color:#666;font-style:italic;text-align:center;font-size:12px;max-width:100%}',
     '.hb-form{border-top:1px solid #e2e5ee;padding:10px;background:#fff;display:flex;gap:8px}',
     '.hb-form textarea{flex:1;resize:none;border:1px solid #d6d9e3;border-radius:8px;padding:8px;font-family:inherit;font-size:14px;min-height:40px;max-height:120px;box-sizing:border-box}',
@@ -132,12 +133,25 @@
       return r.json().then(function (j) { return { code: r.status, body: j }; });
     });
   }
+  // Operator and system text gets clickable https links; built with DOM nodes, never innerHTML.
+  function linkify(el, text, raw) {
+    if (!text) { el.textContent = raw; return; }
+    text.split(/(https?:\/\/[^\s<>"]+[^\s<>".,;:!?)])/).forEach(function (part, i) {
+      if (i % 2) {
+        var a = document.createElement('a');
+        a.href = part; a.textContent = part; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        el.appendChild(a);
+      } else if (part) {
+        el.appendChild(document.createTextNode(part));
+      }
+    });
+  }
   function appendMsg(m) {
     if (m.id && state.seen[m.id]) return;
     if (m.id) state.seen[m.id] = true;
     var d = document.createElement('div');
     d.className = 'hb-m ' + (m.sender || 'system');
-    d.textContent = m.body;
+    linkify(d, m.sender === 'buyer' ? '' : String(m.body || ''), m.body);
     els.log.appendChild(d);
     els.log.scrollTop = els.log.scrollHeight;
     if (m.id && m.sender !== 'buyer') state.lastMsgId = Math.max(state.lastMsgId, m.id);
@@ -170,7 +184,7 @@
       state.convId    = r.body.conv_id;
       try { localStorage.setItem(STORAGE_KEY, r.body.token); } catch (e) {}
       els.title.textContent = r.body.operator_name || 'Chat';
-      if (r.body.greeting) appendMsg({ sender: 'system', body: r.body.greeting });
+      if (r.body.greeting) appendMsg({ id: r.body.greeting_id || 0, sender: 'system', body: r.body.greeting });
       maybeAskIdentity();
       openWS();
     });

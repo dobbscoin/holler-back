@@ -65,7 +65,7 @@ class Vapid {
 			CURLOPT_POSTFIELDS     => $enc,
 			CURLOPT_HTTPHEADER     => $headers,
 			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_TIMEOUT        => 4,   // runs inside the WS loop — keep it short
+			CURLOPT_TIMEOUT        => 8,   // runs in worker/notify.php, off the WS loop
 			CURLOPT_SSL_VERIFYPEER => true,
 			CURLOPT_HEADER         => false,
 		) );

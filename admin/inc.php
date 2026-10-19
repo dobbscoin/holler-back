@@ -64,6 +64,13 @@ function admin_css() {
 	.hb-card button.p{margin-top:16px;background:#2f6feb;color:#fff;border:none;border-radius:8px;padding:10px 18px;font-weight:600;cursor:pointer;font-size:14px}
 	.hb-card .note{background:#fef5e1;border:1px solid #f4d47a;color:#5a4200;padding:10px 12px;border-radius:6px;margin:14px 0;font-size:13px}
 	.hb-code{background:#f4f5f9;border:1px solid #e4e6ee;padding:8px 10px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all}
+	.hb-card + .hb-card{margin-top:-30px}
+	.hb-card h3{margin:22px 0 4px;font-size:15px}
+	.hb-card label.ck{display:flex;align-items:center;gap:8px;color:#222;font-size:14px;margin:8px 0}
+	.hb-card label.ck input{width:auto;margin:0}
+	.hb-card input.n{width:64px;display:inline-block;padding:4px 6px}
+	.hb-card .hint{font-size:12px;color:#888;margin:4px 0 0}
+	.hb-card button.s{margin:16px 0 0 8px;background:#eef1f7;color:#223;border:1px solid #d6d9e3;border-radius:8px;padding:9px 14px;cursor:pointer;font-size:14px}
 	.hb-err{color:#c00;font-size:13px;margin:8px 0}
 	.hb-ok{color:#080;font-size:13px;margin:8px 0}
 	@media (max-width:640px){.hb-2col{grid-template-columns:1fr}.hb-list{display:none}.hb-list.on{display:block}.hb-pane{display:none}.hb-pane.on{display:flex}}
