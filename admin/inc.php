@@ -55,6 +55,14 @@ function admin_css() {
 	.hb-reply textarea{flex:1;resize:none;border:1px solid #d6d9e3;border-radius:8px;padding:8px;font-family:inherit;font-size:14px;min-height:40px;max-height:120px}
 	.hb-reply textarea:focus{outline:none;border-color:#2f6feb}
 	.hb-reply button{background:#2f6feb;color:#fff;border:none;border-radius:8px;padding:0 16px;font-weight:600;cursor:pointer}
+	.hb-lhdr{display:flex;gap:6px;padding:8px;border-bottom:1px solid #e4e6ee;position:sticky;top:0;background:#fff}
+	.hb-lhdr button,.hb-phdr button{background:#eef1f7;color:#223;border:1px solid #d6d9e3;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+	.hb-lhdr button.on{background:#2f6feb;color:#fff;border-color:#2f6feb}
+	.hb-lhdr button.del{margin-left:auto}
+	.hb-lhdr button.del,.hb-phdr button.del{color:#b00020}
+	.hb-phdr .who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+	.hb-phdr .acts{display:flex;gap:6px;flex-shrink:0}
+	.hb-phdr .hb-back{display:none;margin-right:8px}
 	.hb-empty{padding:40px 20px;text-align:center;color:#888}
 	.hb-card{max-width:520px;margin:60px auto;background:#fff;border-radius:10px;padding:30px;box-shadow:0 4px 24px rgba(0,0,0,.05)}
 	.hb-card h2{margin:0 0 14px;font-size:20px}
@@ -73,7 +81,7 @@ function admin_css() {
 	.hb-card button.s{margin:16px 0 0 8px;background:#eef1f7;color:#223;border:1px solid #d6d9e3;border-radius:8px;padding:9px 14px;cursor:pointer;font-size:14px}
 	.hb-err{color:#c00;font-size:13px;margin:8px 0}
 	.hb-ok{color:#080;font-size:13px;margin:8px 0}
-	@media (max-width:640px){.hb-2col{grid-template-columns:1fr}.hb-list{display:none}.hb-list.on{display:block}.hb-pane{display:none}.hb-pane.on{display:flex}}
+	@media (max-width:640px){.hb-2col{grid-template-columns:1fr}.hb-phdr .hb-back{display:inline-block}.hb-bar{flex-wrap:wrap;gap:6px}.hb-list{display:none}.hb-list.on{display:block}.hb-pane{display:none}.hb-pane.on{display:flex}}
 	';
 }
 

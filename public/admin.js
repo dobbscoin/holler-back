@@ -4,7 +4,7 @@
  */
 (function () {
   var HB = window.HB;
-  var state = { convs: [], current: null, lastMsgId: 0, ws: null, reconnectDelay: 1000 };
+  var state = { convs: [], counts: { open: 0, closed: 0 }, view: 'open', current: null, lastMsgId: 0, ws: null, reconnectDelay: 1000 };
 
   function api(method, path, body) {
     var opts = {
@@ -72,27 +72,57 @@
       refreshConvs();
     }
     if (env.type === 'conversation.created') { refreshConvs(); }
-    if (env.type === 'conversation.closed' && state.current && state.current.id === env.conv_id) {
-      showEmpty('This conversation was closed.');
+    if (env.type === 'conversation.closed') {
+      if (state.current && state.current.id === env.conv_id && state.view === 'open') showEmpty('This conversation was closed.');
+      refreshConvs();
     }
   }
 
   /* --------- Inbox rendering --------- */
   function refreshConvs() {
-    api('GET', '/api/admin/conversations').then(function (r) {
+    api('GET', '/api/admin/conversations?status=' + state.view).then(function (r) {
       if (r.code !== 200) return;
       state.convs = r.body.conversations || [];
+      state.counts = r.body.counts || state.counts;
       renderList();
       // update tab badge count in bar
-      var un = state.convs.reduce(function (n, c) { return n + (c.unread_admin > 0 ? 1 : 0); }, 0);
-      document.title = (un > 0 ? '(' + un + ') ' : '') + 'Console — Holler Back';
+      if (state.view === 'open') {
+        var un = state.convs.reduce(function (n, c) { return n + (c.unread_admin > 0 ? 1 : 0); }, 0);
+        document.title = (un > 0 ? '(' + un + ') ' : '') + 'Console — Holler Back';
+      }
     });
   }
   function renderList() {
     var el = document.getElementById('hb-list');
     if (!el) return;
-    if (!state.convs.length) { el.innerHTML = '<div class="hb-empty">No conversations yet.</div>'; return; }
     el.innerHTML = '';
+    var hdr = document.createElement('div');
+    hdr.className = 'hb-lhdr';
+    ['open', 'closed'].forEach(function (v) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = state.view === v ? 'on' : '';
+      b.textContent = (v === 'open' ? 'Open' : 'Closed') + ' (' + (state.counts[v] || 0) + ')';
+      b.addEventListener('click', function () { if (state.view !== v) { state.view = v; showEmpty('Select a conversation.'); refreshConvs(); } });
+      hdr.appendChild(b);
+    });
+    if (state.view === 'closed' && state.convs.length) {
+      var del = document.createElement('button');
+      del.type = 'button'; del.className = 'del'; del.textContent = 'Delete all';
+      del.addEventListener('click', function () {
+        if (!confirm('Permanently delete all ' + state.counts.closed + ' closed conversations?')) return;
+        api('POST', '/api/admin/delete', { all_closed: true }).then(function (r) {
+          if (r.code !== 200) { alert('Delete failed (' + r.code + ')'); return; }
+          showEmpty('Deleted ' + r.body.deleted + ' conversations.'); refreshConvs();
+        });
+      });
+      hdr.appendChild(del);
+    }
+    el.appendChild(hdr);
+    if (!state.convs.length) {
+      el.insertAdjacentHTML('beforeend', '<div class="hb-empty">' + (state.view === 'open' ? 'No open conversations.' : 'Nothing closed.') + '</div>');
+      return;
+    }
     state.convs.forEach(function (c) {
       var d = document.createElement('div');
       d.className = 'hb-conv' + (c.unread_admin > 0 ? ' unread' : '') + (state.current && state.current.id === c.id ? ' on' : '');
@@ -112,6 +142,7 @@
     state.lastMsgId = 0;
     renderList();
     renderPaneHeader(c);
+    showPaneMobile(true);
     api('GET', '/api/admin/messages?conv_id=' + c.id).then(function (r) {
       if (r.code !== 200) return;
       var log = document.getElementById('hb-log');
@@ -125,19 +156,31 @@
     if (!pane) return;
     var who = escape(c.buyer_name || 'Visitor');
     var email = c.buyer_email ? ' &lt;' + escape(c.buyer_email) + '&gt;' : '';
+    var closed = c.status === 'closed';
     pane.innerHTML =
-      '<div class="hb-phdr"><strong>' + who + '</strong>' + email +
-        '<button type="button" id="hb-close">Close chat</button></div>' +
+      '<div class="hb-phdr"><button type="button" class="hb-back" id="hb-back">‹ Back</button>' +
+        '<span class="who"><strong>' + who + '</strong>' + email + '</span>' +
+        '<span class="acts">' + (closed ? '' : '<button type="button" id="hb-close">Close</button>') +
+        '<button type="button" class="del" id="hb-del">Delete</button></span></div>' +
       '<div class="hb-plog" id="hb-log"></div>' +
+      (closed ? '<div class="hb-empty" style="padding:12px">Closed. The buyer starts a new chat if they write again.</div>' :
       '<form class="hb-reply" id="hb-replyform">' +
         '<textarea id="hb-replybox" rows="1" placeholder="Reply…"></textarea>' +
         '<button type="submit">Send</button>' +
-      '</form>';
+      '</form>');
+    document.getElementById('hb-back').addEventListener('click', function () { showEmpty('Select a conversation.'); });
+    document.getElementById('hb-del').addEventListener('click', function () {
+      if (!confirm('Permanently delete this conversation and its messages?')) return;
+      api('POST', '/api/admin/delete', { conv_id: c.id }).then(function (r) {
+        if (r.code !== 200) { alert('Delete failed (' + r.code + ')'); return; }
+        refreshConvs(); showEmpty('Conversation deleted.');
+      });
+    });
+    if (closed) return;
     document.getElementById('hb-close').addEventListener('click', function () {
-      if (!confirm('Close this conversation?')) return;
       api('POST', '/api/admin/close', { conv_id: c.id }).then(function (r) {
         if (r.code !== 200) { alert('Close failed (' + r.code + ')'); return; }
-        refreshConvs(); showEmpty('Conversation closed.');
+        refreshConvs(); showEmpty('Conversation closed. It is under Closed.');
       });
     });
     document.getElementById('hb-replyform').addEventListener('submit', function (ev) {
@@ -166,6 +209,13 @@
     if (pane) pane.innerHTML = '<div class="hb-empty">' + escape(msg) + '</div>';
     state.current = null;
     renderList();
+    showPaneMobile(false);
+  }
+  // Phones show the list or the open chat, not both (see the @media rule in admin/inc.php)
+  function showPaneMobile(on) {
+    var list = document.getElementById('hb-list'), pane = document.getElementById('hb-pane');
+    if (list) list.classList.toggle('on', !on);
+    if (pane) pane.classList.toggle('on', !!on);
   }
   function appendMsg(m) {
     var log = document.getElementById('hb-log');
@@ -310,6 +360,7 @@
 
   /* --------- boot --------- */
   if (HB.tab === 'inbox') {
+    showPaneMobile(false);
     refreshConvs();
     openWS();
     // Deep-link: #conv=N opens that conversation once list is loaded

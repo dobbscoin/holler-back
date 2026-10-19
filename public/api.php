@@ -13,10 +13,11 @@
  *   GET  /api/admin/vapid-public           — VAPID public key (base64url) for the sw subscribe call
  *   POST /api/admin/subscribe              — persist a Web Push subscription {endpoint, keys.p256dh, keys.auth}
  *   POST /api/admin/unsubscribe            — drop a subscription by endpoint
- *   GET  /api/admin/conversations          — list open conversations
+ *   GET  /api/admin/conversations?status=  — list open (default) or closed conversations, plus counts
  *   GET  /api/admin/messages?conv_id=N     — full transcript for a conversation
  *   POST /api/admin/reply                  — operator replies on a conversation
  *   POST /api/admin/close                  — mark a conversation closed
+ *   POST /api/admin/delete                 — erase a conversation {conv_id}, or every closed one {all_closed:true}
  *   GET  /api/admin/ws-token               — mint a short-lived WS token for the admin socket
  *   POST /api/admin/notify/save            — Discord webhook, triggers, away message
  *   POST /api/admin/notify/test            — post a sample to the saved Discord webhook now
@@ -232,17 +233,22 @@ if ( strpos( $path, 'admin/' ) === 0 ) {
 		need_method( 'GET' );
 		$ws = Workspace::primary();
 		if ( ! $ws ) { json_out( array( 'conversations' => array() ) ); }
+		$status = ( $_GET['status'] ?? 'open' ) === 'closed' ? 'closed' : 'open';
+		$counts = array( 'open' => 0, 'closed' => 0 );
+		foreach ( store()->all( 'SELECT status, COUNT(*) AS n FROM conversations WHERE workspace_id = ? GROUP BY status', array( (int) $ws['id'] ) ) as $r ) {
+			$counts[ $r['status'] === 'closed' ? 'closed' : 'open' ] += (int) $r['n'];
+		}
 		$rows = store()->all(
 			'SELECT c.id, c.token, c.buyer_name, c.buyer_email, c.status, c.unread_admin, c.created_at, c.last_activity_at,
 			 (SELECT body FROM messages WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1) AS last_body,
 			 (SELECT sender FROM messages WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1) AS last_sender
 			 FROM conversations c
-			 WHERE c.workspace_id = ?
+			 WHERE c.workspace_id = ? AND c.status ' . ( $status === 'closed' ? '= "closed"' : '!= "closed"' ) . '
 			 ORDER BY c.last_activity_at DESC
 			 LIMIT 200',
 			array( (int) $ws['id'] )
 		);
-		json_out( array( 'conversations' => $rows ) );
+		json_out( array( 'conversations' => $rows, 'counts' => $counts ) );
 	}
 
 	if ( $tail === 'messages' ) {
@@ -310,6 +316,26 @@ if ( strpos( $path, 'admin/' ) === 0 ) {
 		);
 		notify_ws( array( 'type' => 'conversation.closed', 'workspace_id' => (int) $ws['id'], 'conv_id' => $conv_id ) );
 		json_out( array( 'ok' => true ) );
+	}
+
+	if ( $tail === 'delete' ) {
+		need_method( 'POST' );
+		csrf_check();
+		$body = json_in();
+		$ws = Workspace::primary();
+		if ( ! empty( $body['all_closed'] ) ) {
+			$n = store()->q( 'DELETE FROM conversations WHERE workspace_id = ? AND status = "closed"', array( (int) $ws['id'] ) )->rowCount();
+			json_out( array( 'ok' => true, 'deleted' => $n ) );
+		}
+		$conv_id = (int) ( $body['conv_id'] ?? 0 );
+		$conv = store()->one( 'SELECT id, status FROM conversations WHERE id = ? AND workspace_id = ?', array( $conv_id, (int) $ws['id'] ) );
+		if ( ! $conv ) { json_out( array( 'error' => 'not_found' ), 404 ); }
+		// Tell a still-open widget first, so the buyer isn't left typing into nothing
+		if ( $conv['status'] !== 'closed' ) {
+			notify_ws( array( 'type' => 'conversation.closed', 'workspace_id' => (int) $ws['id'], 'conv_id' => $conv_id ) );
+		}
+		store()->q( 'DELETE FROM conversations WHERE id = ?', array( $conv_id ) ); // messages + notify_conv cascade
+		json_out( array( 'ok' => true, 'deleted' => 1 ) );
 	}
 
 	if ( $tail === 'workspace' ) {
