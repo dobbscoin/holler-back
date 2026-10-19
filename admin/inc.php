@@ -33,7 +33,7 @@ function admin_css() {
 	.hb-tabs{display:flex;gap:2px;background:#1f2330;padding:0 12px;flex-shrink:0}
 	.hb-tabs a{color:#a4abbf;padding:8px 14px;font-size:13px;border-radius:6px 6px 0 0}
 	.hb-tabs a.on{background:#f4f5f9;color:#1f2330}
-	.hb-main{flex:1;overflow:hidden}
+	.hb-main{flex:1;min-height:0;overflow-y:auto}
 	.hb-2col{display:grid;grid-template-columns:280px 1fr;height:100%}
 	.hb-list{background:#fff;border-right:1px solid #e4e6ee;overflow-y:auto}
 	.hb-conv{padding:10px 12px;border-bottom:1px solid #eef0f5;cursor:pointer}
