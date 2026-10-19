@@ -2,6 +2,9 @@
  * Holler Back widget. Drop into any page with:
  *   <script src="https://chat.example.com/widget.js" data-holler-id="xy2p9m" async defer></script>
  *
+ * Optional data-holler-mount="#selector" puts the chat button inside that
+ * element (e.g. a site's top bar) instead of floating it bottom-right.
+ *
  * No external deps. CSS is injected inline so nothing else needs to load.
  * WebSocket for realtime; short polling fallback if WS fails to open.
  *
@@ -58,7 +61,12 @@
     '.hb-ident button{margin-top:10px;width:100%;background:#2f6feb;color:#fff;border:none;border-radius:8px;padding:9px;font-weight:600;cursor:pointer}',
     '.hb-off{padding:8px 12px;font-size:12px;color:#a00;background:#fff3f2;border-top:1px solid #ffd8d5;display:none}',
     '.hb-off.on{display:block}',
-    '@media (max-width:480px){.hb-pane{right:10px;bottom:78px;width:calc(100vw - 20px)}.hb-btn{right:14px;bottom:14px}}'
+    '@media (max-width:480px){.hb-pane{right:10px;bottom:78px;width:calc(100vw - 20px)}.hb-btn{right:14px;bottom:14px}}',
+    // Mounted mode: the button sits inside a host element (a top bar, say)
+    // and takes the host's color; the pane drops down from under it.
+    '.hb-btn.hb-inline{position:relative;right:auto;bottom:auto;width:auto;height:auto;padding:4px 6px;background:none;box-shadow:none;color:inherit;z-index:auto}',
+    '.hb-btn.hb-inline svg{width:18px;height:18px;fill:currentColor}',
+    '.hb-pane.hb-top{bottom:auto;right:10px}'
   ].join('\n');
   var styleEl = document.createElement('style');
   styleEl.textContent = css;
@@ -87,7 +95,19 @@
       '<button type="submit">Send</button>' +
     '</form>';
 
-  document.body.appendChild(btn);
+  // data-holler-mount="#selector" puts the button inside that element
+  // instead of floating it bottom-right.
+  var mountSel = script.getAttribute('data-holler-mount');
+  var mount = null;
+  if (mountSel) { try { mount = document.querySelector(mountSel); } catch (e) {} }
+  if (mountSel && !mount) console.warn('holler-back: mount ' + mountSel + ' not found, floating instead');
+  if (mount) {
+    btn.className += ' hb-inline';
+    pane.className += ' hb-top';
+    mount.appendChild(btn);
+  } else {
+    document.body.appendChild(btn);
+  }
   document.body.appendChild(pane);
 
   var els = {
@@ -159,17 +179,26 @@
   }
 
   /* ---------- open / close ---------- */
+  function closePane() {
+    pane.classList.remove('on');
+    btn.style.display = '';
+  }
   btn.addEventListener('click', function () {
+    if (mount) {
+      // A mounted button stays put and toggles.
+      if (paneOpen()) { closePane(); return; }
+      var top = Math.round(btn.getBoundingClientRect().bottom) + 8;
+      pane.style.top = top + 'px';
+      pane.style.maxHeight = 'calc(100vh - ' + (top + 10) + 'px)';
+    } else {
+      btn.style.display = 'none';
+    }
     pane.classList.add('on');
-    btn.style.display = 'none';
     setBadge(0);
     if (!state.started) { state.started = true; ensureConversation(); }
     setTimeout(function () { els.input.focus(); }, 50);
   });
-  els.close.addEventListener('click', function () {
-    pane.classList.remove('on');
-    btn.style.display = '';
-  });
+  els.close.addEventListener('click', closePane);
 
   /* ---------- conversation lifecycle ---------- */
   function ensureConversation() {
