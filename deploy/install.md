@@ -36,6 +36,28 @@ sudo apt install php8.3-cli php8.3-fpm php8.3-sqlite3 php8.3-gmp php8.3-curl php
 `pcntl` is used by `ws-server.php` for SIGTERM handling — it's built into
 the CLI SAPI on Debian/Ubuntu, no separate package needed.
 
+### Shared server? Give it its own PHP user (recommended)
+
+If other PHP sites run on the same box, they normally share the `www-data`
+user, so a hole in any of them can read Holler Back's `config.php`. Its
+`cookie_secret` is enough to forge an admin login. Run Holler Back as its own
+user instead:
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin --user-group hollerback
+sudo cp deploy/holler-back-fpm-pool.conf /etc/php/8.3/fpm/pool.d/holler-back.conf
+sudo systemctl reload php8.3-fpm
+# code: yours, world-readable, not group-writable; config + data: hollerback only
+sudo chgrp -R $USER /var/www/holler-back && sudo chmod -R g-w,o+rX /var/www/holler-back
+sudo chgrp hollerback /var/www/holler-back/config.php && sudo chmod 0640 /var/www/holler-back/config.php
+sudo chown -R hollerback:hollerback /var/www/holler-back/data && sudo chmod 2770 /var/www/holler-back/data
+```
+
+Then use `hollerback` wherever this guide says `www-data` for running PHP:
+`User=`/`Group=` in both systemd units, the cron line, and
+`fastcgi_pass unix:/run/php/php8.3-fpm-holler-back.sock` in the nginx vhost.
+nginx itself still runs as `www-data` and only needs the public files.
+
 ## 3. WebSocket process + notification worker — systemd
 
 ```bash
