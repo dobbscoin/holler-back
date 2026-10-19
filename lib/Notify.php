@@ -69,7 +69,10 @@ class Notify {
 			$p = json_decode( (string) $r['payload'], true ) ?: array();
 			try {
 				if ( $r['kind'] === 'push' ) {
-					Push::fanoutNewMessage( (int) $r['workspace_id'], (int) ( $p['conv_id'] ?? 0 ), (string) ( $p['body'] ?? '' ) );
+					if ( ! self::budget( 'push', $r['workspace_id'] ) ) { self::bumpSuppressed( 'push', $r['workspace_id'] ); continue; }
+					$skipped = self::takeSuppressed( 'push', $r['workspace_id'] );
+					$body = (string) ( $p['body'] ?? '' ) . ( $skipped ? " (+$skipped more)" : '' );
+					Push::fanoutNewMessage( (int) $r['workspace_id'], (int) ( $p['conv_id'] ?? 0 ), $body );
 				} elseif ( $r['kind'] === 'push_test' ) {
 					Push::fanout( (int) $r['workspace_id'], 'Holler Back test', 'Push works on this device.', '/admin/', 0 );
 				}
@@ -78,6 +81,23 @@ class Notify {
 			}
 		}
 		return count( $rows );
+	}
+
+	/* ---------------- flood cap ---------------- */
+
+	/** Anyone can open chats, so alerts per channel per hour are capped (config notify_max_per_hour). */
+	private static function budget( $channel, $workspace_id ) {
+		return rate_hit( "notify:$channel:" . (int) $workspace_id, 3600, max( 1, (int) Config::get( 'notify_max_per_hour', 30 ) ) );
+	}
+	private static function bumpSuppressed( $channel, $workspace_id ) {
+		$k = "notify_suppressed_{$channel}_" . (int) $workspace_id;
+		store()->kvSet( $k, (string) ( (int) ( store()->kvGet( $k )['v'] ?? 0 ) + 1 ) );
+	}
+	private static function takeSuppressed( $channel, $workspace_id ) {
+		$k = "notify_suppressed_{$channel}_" . (int) $workspace_id;
+		$n = (int) ( store()->kvGet( $k )['v'] ?? 0 );
+		if ( $n ) { store()->kvSet( $k, '0' ); }
+		return $n;
 	}
 
 	/* ---------------- Discord + away message (scanned from the DB) ---------------- */
@@ -134,7 +154,15 @@ class Notify {
 					|| ( $s['on_unanswered'] && $now - (int) $pending['sent_at'] >= 60 * max( 1, (int) $s['unanswered_min'] ) );
 				if ( ! $due ) { continue; }
 
+				// Flood cap: past the hourly budget, count it as handled and say so in the next ping
+				if ( ! self::budget( 'discord', $ws['id'] ) ) {
+					self::markConv( (int) $c['id'], array( 'discord_msg_id' => (int) $last['id'], 'discord_at' => $now ) );
+					self::bumpSuppressed( 'discord', $ws['id'] );
+					continue;
+				}
 				$text = self::discordText( $ws, $c, $isNew && $s['on_new'], $waited, $s['include_text'] ? (string) $pending['body'] : '' );
+				$skipped = self::takeSuppressed( 'discord', $ws['id'] );
+				if ( $skipped ) { $text .= "\n_(+$skipped more not announced: over the hourly alert limit)_"; }
 				$res  = static::discordPost( $s['discord_url'], $text ); // static: tests stub the HTTP call
 				self::recordStatus( $ws['id'], $res );
 				if ( $res['ok'] || ( $res['code'] >= 400 && $res['code'] < 500 && $res['code'] !== 429 ) ) {

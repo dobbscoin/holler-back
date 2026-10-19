@@ -13,6 +13,7 @@ class Store {
 		$this->db->exec( 'PRAGMA journal_mode=WAL' );
 		$this->db->exec( 'PRAGMA busy_timeout=5000' ); // api, ws-server and the notify worker all write
 		$this->db->exec( 'PRAGMA foreign_keys=ON' );
+		$this->db->exec( 'PRAGMA secure_delete=ON' ); // a deleted chat is overwritten, not left in free pages
 		$this->migrate();
 	}
 

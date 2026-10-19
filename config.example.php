@@ -18,6 +18,7 @@ return array(
 	'visitor_ip_salt_days' => 30,                       // per-workspace IP-hash salt rotates on this cadence
 	'max_message_len' => 4000,                          // reject longer messages at ingest
 	'max_msgs_per_min_per_conv' => 20,                  // simple flood cap; over → dropped with 429
+	'notify_max_per_hour' => 30,                        // Discord pings / pushes per hour; extras are counted and reported in the next one
 
 	// ---- WebSocket ----------------------------------------------------------
 	// The ws-server.php long-running process binds here. Nginx should
