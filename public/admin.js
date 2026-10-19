@@ -323,6 +323,11 @@
       setTimeout(function () { clearInterval(iv); }, 5000);
     }
   }
+  else {
+    // Only the inbox holds a live socket; elsewhere the indicator would sit on "connecting…"
+    var conn = document.getElementById('hb-conn');
+    if (conn) conn.style.display = 'none';
+  }
   if (HB.tab === 'settings') { bindSettings(); bindNotify(); }
   bindPushBtn();
 })();
