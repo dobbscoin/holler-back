@@ -113,5 +113,5 @@ window.HB = {
 	tab: <?= json_encode( $tab ) ?>,
 };
 </script>
-<script src="/admin.js"></script>
+<script src="/admin.js?v=<?= (int) @filemtime( dirname( __DIR__ ) . '/public/admin.js' ) ?>"></script>
 <?php admin_foot(); ?>
